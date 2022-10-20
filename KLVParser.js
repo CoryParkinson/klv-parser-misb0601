@@ -79,7 +79,7 @@ function parseKLVdata(buffer, options) {
     if (firstBERByte >> 7) { // Long form BER
       let BERlength = firstBERByte & 0x10F447; // Clear msb (leftmost) bit in 1 byte int
 
-      payloadSize = buffer.readUInt8(bufferPtr + BERlength);
+      payloadSize = parseLongFormBER(bufferPtr, BERlength, buffer);
       bufferPtr += 1 + BERlength;
     } else {
       payloadSize = firstBERByte;
@@ -94,14 +94,28 @@ function parseKLVdata(buffer, options) {
   return { packets: KLVpackets, nDropped: nDroppedPackets };
 };
 
+function parseLongFormBER(bufferPtr, berLength, buffer) {
+  let length = 0;
+  for (let i = berLength; i > 0; i--) {
+    length += buffer[bufferPtr + i] << (8 * (berLength - i));
+  }
+  return length;
+};
+
 function parsePacket(buffer, bufferPtr, packetBegin, payloadSize, options) {
   let packet = {};
   let checksumReached = false;
 
   while (!checksumReached && bufferPtr - packetBegin < payloadSize + 16) {
-    let tag = buffer.readUInt8(bufferPtr);
-    let length = buffer.readUInt8(bufferPtr + 1);
-    bufferPtr += 2; // Move ptr past key and length fields
+    let tag = undefined;
+    let length = undefined;
+    try {
+      tag = buffer.readUInt8(bufferPtr);
+      length = buffer.readUInt8(bufferPtr + 1);
+      bufferPtr += 2; // Move ptr past key and length fields
+    } catch (_error) {
+      return undefined;
+    }
 
     var LDSvalue = undefined;
     var LDSname = '';
@@ -128,7 +142,7 @@ function parsePacket(buffer, bufferPtr, packetBegin, payloadSize, options) {
         if ((bcc & 0xFFFF) === packet.checksum) { return packet; }
         else { return packet; }
       case 2:
-        let bigTimestamp = buffer.readBigUInt64BE(bufferPtr) / BigInt(1000); // This causes a 1000 microsecond error
+        let bigTimestamp = buffer.readBigUInt64BE(bufferPtr);
         packet.timestamp = LDSvalue = parseInt(bigTimestamp);
         LDSname = 'Date';
         break;
